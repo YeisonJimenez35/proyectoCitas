@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 
 const formatearFechaHora = (fechaHora) => {
@@ -12,18 +12,36 @@ const formatearFechaHora = (fechaHora) => {
   }).format(new Date(fechaHora));
 };
 
+const obtenerFechaClave = (fecha) => {
+  const anio = fecha.getFullYear();
+  const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+  const dia = String(fecha.getDate()).padStart(2, '0');
+  return `${anio}-${mes}-${dia}`;
+};
+
+const obtenerFechaDesdeClave = (clave) => {
+  const [anio, mes, dia] = clave.split('-').map(Number);
+  return new Date(anio, mes - 1, dia);
+};
+
+const formatearClave = (clave) => {
+  const fecha = obtenerFechaDesdeClave(clave);
+  return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).format(fecha);
+};
+
 const AgendaPaciente = () => {
   const [horarios, setHorarios] = useState([]);
   const [medicos, setMedicos] = useState([]);
   const [citas, setCitas] = useState([]);
   const [horarioSeleccionado, setHorarioSeleccionado] = useState('');
   const [medicoSeleccionado, setMedicoSeleccionado] = useState('');
-  const [motivo, setMotivo] = useState('');
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState(false);
   const [cargandoHorarios, setCargandoHorarios] = useState(false);
   const [cargandoMedicos, setCargandoMedicos] = useState(false);
   const [cargandoCitas, setCargandoCitas] = useState(false);
+  const [mesActual, setMesActual] = useState(() => new Date());
+  const [diaSeleccionado, setDiaSeleccionado] = useState('');
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuario') || 'null');
 
@@ -81,12 +99,92 @@ const AgendaPaciente = () => {
     cargarCitasPaciente();
   }, []);
 
+  const diasHabilitados = useMemo(() => {
+    const mapa = new Map();
+
+    horarios.forEach((horario) => {
+      const clave = horario.fecha;
+      mapa.set(clave, (mapa.get(clave) || 0) + 1);
+    });
+
+    return mapa;
+  }, [horarios]);
+
+  const horariosPorDia = useMemo(() => {
+    const mapa = new Map();
+
+    horarios.forEach((horario) => {
+      const lista = mapa.get(horario.fecha) || [];
+      lista.push(horario);
+      mapa.set(horario.fecha, lista);
+    });
+
+    return mapa;
+  }, [horarios]);
+
+  const diasDelMes = useMemo(() => {
+    const primerDia = new Date(mesActual.getFullYear(), mesActual.getMonth(), 1);
+    const ultimoDia = new Date(mesActual.getFullYear(), mesActual.getMonth() + 1, 0);
+    const dias = [];
+
+    for (let d = 1; d <= ultimoDia.getDate(); d += 1) {
+      dias.push(new Date(mesActual.getFullYear(), mesActual.getMonth(), d));
+    }
+
+    const inicioCalendario = new Date(primerDia);
+    inicioCalendario.setDate(primerDia.getDate() - primerDia.getDay());
+
+    const finCalendario = new Date(ultimoDia);
+    finCalendario.setDate(ultimoDia.getDate() + (6 - ultimoDia.getDay()));
+
+    const celdas = [];
+
+    for (let fecha = new Date(inicioCalendario); fecha <= finCalendario; fecha.setDate(fecha.getDate() + 1)) {
+      celdas.push(new Date(fecha));
+    }
+
+    return celdas;
+  }, [mesActual]);
+
+  const horariosSeleccionados = useMemo(() => {
+    if (!diaSeleccionado) {
+      return [];
+    }
+
+    return horariosPorDia.get(diaSeleccionado) || [];
+  }, [diaSeleccionado, horariosPorDia]);
+
+  useEffect(() => {
+    if (horarios.length === 0) {
+      return;
+    }
+
+    const primeraFechaDisponible = [...diasHabilitados.keys()].sort()[0];
+
+    if (!diaSeleccionado && primeraFechaDisponible) {
+      setDiaSeleccionado(primeraFechaDisponible);
+      return;
+    }
+
+    if (diaSeleccionado && !diasHabilitados.has(diaSeleccionado)) {
+      setDiaSeleccionado(primeraFechaDisponible || '');
+    }
+  }, [horarios, diasHabilitados, diaSeleccionado]);
+
+  useEffect(() => {
+    if (horariosSeleccionados.length > 0) {
+      setHorarioSeleccionado(String(horariosSeleccionados[0].id));
+    } else {
+      setHorarioSeleccionado('');
+    }
+  }, [diaSeleccionado, horariosSeleccionados]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!horarioSeleccionado) {
       setError(true);
-      setMensaje('Por favor, selecciona un horario de la lista.');
+      setMensaje('Por favor, selecciona un día y una hora disponible.');
       return;
     }
 
@@ -106,7 +204,6 @@ const AgendaPaciente = () => {
       const respuesta = await axios.post('http://localhost:8080/api/citas', payloadCita);
       setError(false);
       setMensaje(respuesta.data);
-      setMotivo('');
       setHorarioSeleccionado('');
       await Promise.all([cargarHorariosDisponibles(), cargarMedicosDisponibles(), cargarCitasPaciente()]);
     } catch (err) {
@@ -132,10 +229,10 @@ const AgendaPaciente = () => {
   };
 
   return (
-    <div style={{ display: 'grid', gap: '24px', gridTemplateColumns: 'minmax(0, 1fr)', maxWidth: '1100px', margin: '0 auto' }}>
+    <div style={{ display: 'grid', gap: '24px', gridTemplateColumns: 'minmax(0, 1fr)', maxWidth: '1200px', margin: '0 auto' }}>
       <div style={{ padding: '24px', border: '1px solid #ccc', borderRadius: '8px', fontFamily: 'Arial, sans-serif' }}>
         <h2>Agendar una Cita Médica</h2>
-        <p style={{ color: '#666' }}>Selecciona uno de los espacios de atención configurados por nuestro personal.</p>
+        <p style={{ color: '#666' }}>Selecciona el día en el calendario para ver las horas disponibles y reserva tu cita.</p>
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '15px' }}>
@@ -157,33 +254,115 @@ const AgendaPaciente = () => {
             </select>
           </div>
 
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ fontWeight: 'bold' }}>Horarios Disponibles:</label>
-            <select
-              value={horarioSeleccionado}
-              onChange={(e) => setHorarioSeleccionado(e.target.value)}
-              disabled={cargandoHorarios}
-              style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '4px' }}
-            >
-              <option value="">{cargandoHorarios ? '-- Cargando horarios --' : '-- Selecciona un día y hora --'}</option>
-              {horarios.map((h) => (
-                <option key={h.id} value={h.id}>
-                  📅 {h.fecha} | ⏰ {h.horaInicio.substring(0, 5)} a {h.horaFin.substring(0, 5)}
-                </option>
-              ))}
-            </select>
-          </div>
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(140px, 0.5fr)', gap: '20px', alignItems: 'start' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontWeight: 'bold' }}>Calendario mensual</label>
+                    <p style={{ color: '#666', margin: '4px 0 0 0' }}>Los días con horarios habilitados se muestran en azul.</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={() => setMesActual(new Date(mesActual.getFullYear(), mesActual.getMonth() - 1, 1))}
+                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: 'white', cursor: 'pointer', color: '#111827', fontSize: '1rem', fontWeight: 'bold' }}
+                    >
+                      ←
+                    </button>
+                    <span style={{ alignSelf: 'center', fontWeight: 'bold' }}>
+                      {new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(mesActual)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMesActual(new Date(mesActual.getFullYear(), mesActual.getMonth() + 1, 1))}
+                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: 'white', cursor: 'pointer', color: '#111827', fontSize: '1rem', fontWeight: 'bold' }}
+                    >
+                      →
+                    </button>
+                  </div>
+                </div>
 
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ fontWeight: 'bold' }}>Motivo de la Consulta:</label>
-            <textarea
-              rows="3"
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              placeholder="Ej. Control general, dolor de cabeza intenso..."
-              required
-              style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '6px' }}>
+                  {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia) => (
+                    <div key={dia} style={{ textAlign: 'center', color: '#475569', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                      {dia}
+                    </div>
+                  ))}
+                  {diasDelMes.map((fecha) => {
+                    const clave = obtenerFechaClave(fecha);
+                    const habilitado = diasHabilitados.has(clave);
+                    const esMesActual = fecha.getMonth() === mesActual.getMonth();
+                    const seleccionado = diaSeleccionado === clave;
+
+                    return (
+                      <button
+                        key={clave}
+                        type="button"
+                        onClick={() => setDiaSeleccionado(clave)}
+                        disabled={!habilitado}
+                        style={{
+                          padding: '6px 0',
+                          minHeight: '34px',
+                          borderRadius: '8px',
+                          border: seleccionado ? '2px solid #0f172a' : '1px solid #cbd5e1',
+                          backgroundColor: habilitado ? '#2563eb' : esMesActual ? '#f8fafc' : '#eef2f7',
+                          color: habilitado ? 'white' : '#94a3b8',
+                          cursor: habilitado ? 'pointer' : 'not-allowed',
+                          fontWeight: seleccionado ? 'bold' : 'normal',
+                          fontSize: '0.88rem'
+                        }}
+                      >
+                        {fecha.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{
+                padding: '14px',
+                borderRadius: '12px',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #dbe7ff'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '12px' }}>
+                  <label style={{ fontWeight: 'bold', fontSize: '0.8rem' }}>Horas disponibles</label>
+                  {diaSeleccionado && (
+                    <span style={{ color: '#475569', fontSize: '0.78rem' }}>{formatearClave(diaSeleccionado)}</span>
+                  )}
+                </div>
+
+                {cargandoHorarios ? (
+                  <p style={{ fontSize: '0.8rem' }}>Cargando horarios...</p>
+                ) : !diaSeleccionado ? (
+                  <p style={{ color: '#666', fontSize: '0.8rem' }}>Selecciona un día habilitado para ver las horas disponibles.</p>
+                ) : horariosSeleccionados.length === 0 ? (
+                  <p style={{ color: '#666', fontSize: '0.8rem' }}>No hay horarios disponibles para este día.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    {horariosSeleccionados.map((horario) => (
+                      <button
+                        key={horario.id}
+                        type="button"
+                        onClick={() => setHorarioSeleccionado(String(horario.id))}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: horarioSeleccionado === String(horario.id) ? '2px solid #0f172a' : '1px solid #cbd5e1',
+                          backgroundColor: horarioSeleccionado === String(horario.id) ? '#dbeafe' : 'white',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          color: '#111827'
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold', fontSize: '0.8rem' }}>{horario.horaInicio.substring(0, 5)} - {horario.horaFin.substring(0, 5)}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <button

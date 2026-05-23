@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Registro from './pages/Registro';
 import AgendaPersonal from './pages/AgendaPersonal';
-import AgendaPaciente from './pages/AgendaPaciente'; // 🚀 Paso 1: Importamos el nuevo componente
+import AgendaPaciente from './pages/AgendaPaciente';
+
+const TIEMPO_INACTIVIDAD_MS = 3 * 60 * 1000;
 
 function App() {
   const [usuarioLogueado, setUsuarioLogueado] = useState(null);
-  const [vistaActual, setVistaActual] = useState('login'); // 'login' o 'registro'
+  const [vistaActual, setVistaActual] = useState('login');
+  const [sesionExpirada, setSesionExpirada] = useState(false);
 
-  // Verificamos si ya hay un usuario guardado en la sesión al cargar la página
   useEffect(() => {
     const usuarioGuardado = localStorage.getItem('usuario');
     if (usuarioGuardado) {
@@ -16,14 +18,52 @@ function App() {
     }
   }, []);
 
-  // Función para cerrar sesión y limpiar el almacenamiento
-  const cerrarSesion = () => {
+  const limpiarSesion = () => {
     localStorage.removeItem('usuario');
     setUsuarioLogueado(null);
     setVistaActual('login');
   };
 
-  // 1. SI EL USUARIO YA INICIÓ SESIÓN
+  const cerrarSesion = () => {
+    limpiarSesion();
+    setSesionExpirada(false);
+  };
+
+  const expirarSesion = () => {
+    limpiarSesion();
+    setSesionExpirada(true);
+  };
+
+  useEffect(() => {
+    if (!usuarioLogueado || usuarioLogueado.rol === 'PERSONAL_CONSULTORIO') {
+      return;
+    }
+
+    let timeoutId;
+
+    const reiniciarTemporizador = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        expirarSesion();
+      }, TIEMPO_INACTIVIDAD_MS);
+    };
+
+    const eventos = ['mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+
+    eventos.forEach((evento) => {
+      window.addEventListener(evento, reiniciarTemporizador);
+    });
+
+    reiniciarTemporizador();
+
+    return () => {
+      clearTimeout(timeoutId);
+      eventos.forEach((evento) => {
+        window.removeEventListener(evento, reiniciarTemporizador);
+      });
+    };
+  }, [usuarioLogueado]);
+
   if (usuarioLogueado) {
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px' }}>
@@ -38,7 +78,6 @@ function App() {
           {usuarioLogueado.rol === 'PERSONAL_CONSULTORIO' ? (
             <AgendaPersonal />
           ) : (
-            /* 🚀 Paso 2: Reemplazamos el letrero provisional por el componente real */
             <AgendaPaciente />
           )}
         </main>
@@ -46,12 +85,59 @@ function App() {
     );
   }
 
-  // 2. SI NO HA INICIADO SESIÓN (Muestra Login o Registro alternable)
+  if (sesionExpirada) {
+    return (
+      <div style={{
+        fontFamily: 'Arial, sans-serif',
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        padding: '20px',
+        background: 'linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)'
+      }}>
+        <div style={{
+          maxWidth: '460px',
+          width: '100%',
+          padding: '32px 28px',
+          borderRadius: '16px',
+          backgroundColor: 'white',
+          boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
+          border: '1px solid #dbe7ff'
+        }}>
+          <div style={{ fontSize: '2.2rem', marginBottom: '12px' }}>⏰</div>
+          <h2 style={{ margin: '0 0 12px 0', color: '#1f2a44' }}>Sesión expirada</h2>
+          <p style={{ marginBottom: '24px', color: '#555', lineHeight: 1.6 }}>
+            Tu sesión ha caducado por inactividad. Puedes volver a la página de inicio para ingresar nuevamente.
+          </p>
+          <button
+            onClick={() => {
+              setSesionExpirada(false);
+              setVistaActual('login');
+            }}
+            style={{
+              padding: '12px 20px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '1rem'
+            }}
+          >
+            Volver a página de inicio
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', textAlign: 'center' }}>
       {vistaActual === 'login' ? (
         <div>
-          {/* 🚀 Pasamos la función que actualiza el estado inmediato */}
           <Login onLoginSuccess={(usuario) => setUsuarioLogueado(usuario)} />
           <p>¿No tienes cuenta? <span style={{ color: '#007bff', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setVistaActual('registro')}>Regístrate aquí</span></p>
         </div>
