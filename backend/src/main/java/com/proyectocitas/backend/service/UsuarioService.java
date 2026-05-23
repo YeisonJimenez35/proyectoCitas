@@ -1,4 +1,5 @@
 package com.proyectocitas.backend.service;
+
 import com.proyectocitas.backend.model.Usuario;
 import com.proyectocitas.backend.repository.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,23 @@ public class UsuarioService {
             throw new RuntimeException("El correo ya se encuentra registrado.");
         }
         return usuarioRepository.save(usuario);
+    }
+
+    /**
+     * Valida las credenciales de inicio de sesión de un usuario.
+     * @param email Correo electrónico ingresado.
+     * @param password Contraseña ingresada.
+     * @return El objeto Usuario correspondiente si las credenciales son válidas, o null si no coinciden.
+     */
+    public Usuario validarLogin(String email, String password) {
+        // Buscamos al usuario por su email
+        Usuario usuario = usuarioRepository.findByEmail(email);
+        
+        // Verificamos si existe y si la contraseña coincide directamente
+        if (usuario != null && usuario.getPassword().equals(password)) {
+            return usuario;
+        }
+        return null; // Retorna null si las credenciales son incorrectas
     }
 
     /**
